@@ -1,20 +1,18 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net"
 	"os"
 	"os/signal"
-	"strings"
-	"sync"
 	"syscall"
+	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/mitchellh/go-homedir"
-	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +23,7 @@ var date string
 type OpenerOptions struct {
 	Network string `yaml:"network"`
 	Address string `yaml:"address"`
-
+    Timeout int64 `yaml:"timeout"` // in milliseconds
 	ErrOut io.Writer
 }
 
@@ -34,7 +32,8 @@ func NewOpenerCmd(errOut io.Writer) *cobra.Command {
 
 	o := &OpenerOptions{
 		Network: "unix",
-		Address: "~/.opener.sock",
+		Address: "~/.copier.sock",
+        Timeout: 10,
 		ErrOut:  errOut,
 	}
 
@@ -99,7 +98,7 @@ func (o *OpenerOptions) Run() error {
 				return
 			}
 
-			go handleConnection(conn, o.ErrOut)
+			go handleConnection(conn, o.ErrOut, o.Timeout)
 		}
 	}()
 
@@ -111,64 +110,29 @@ func (o *OpenerOptions) Run() error {
 	return nil
 }
 
-var browserMu sync.Mutex
-
-var openURL = func(line string) (string, error) {
-	// We try out best avoiding race-condition on swapping browser.{Stdout,Stderr}.
-	// This works in a case when there are two or more consumers exist for this package.
-	//
-	// Fingers-crossed when github.com/pkg/browser is used concurrently outside of this package...
-	browserMu.Lock()
-
-	stdout, stderr := browser.Stdout, browser.Stderr
-
-	defer func() {
-		browser.Stdout = stdout
-		browser.Stderr = stderr
-
-		browserMu.Unlock()
-	}()
-
-	var buf bytes.Buffer
-
-	browser.Stdout = &buf
-	browser.Stderr = &buf
-
-	err := browser.OpenURL(line)
-
-	return buf.String(), err
-}
-
-func handleConnection(conn net.Conn, errOut io.Writer) {
+func handleConnection(conn net.Conn, errOut io.Writer, timeoutMillis int64) {
 	defer conn.Close()
+    fmt.Println(timeoutMillis)
 
-	line, err := bufio.NewReader(conn).ReadString('\n')
-	line = strings.TrimRight(line, "\n")
-	fmt.Fprintf(errOut, "received %q\n", line)
-	if err != nil {
-		if err != io.EOF {
-			fmt.Fprintln(errOut, err)
-			return
-		}
-	}
+    conn.SetReadDeadline(time.Now().Add(time.Duration(timeoutMillis * 10e6)))
 
-	logs, err := openURL(line)
+    data, err := ioutil.ReadAll(conn)
+    if err != nil {
+        if err, ok := err.(net.Error); !ok || !err.Timeout() {
+            fmt.Fprintf(errOut, "failed to read from socket: %v\n", err)
+            return
+        }
+    
+    }
 
-	if logs != "" {
-		fmt.Fprint(errOut, logs)
-	}
+	fmt.Fprintf(errOut, "received %q\n", data)
 
-	if err != nil {
-		fmt.Fprintf(errOut, "failed to open %q: %v\n", line, err)
-
-		// Send back the logs from `open` to the client over e.g. the unix domain socket, so that
-		// `open` on the client machine would work more like that on the server.
-		//
-		// Note that this works only when the client selected the protocol of SOCK_STREAM rather than e.g. SOCK_DGRAM.
-		// `socat`, for example, negotiates the protocol to prefer SOCK_STREAM so you won't usually care.
-		if _, err := conn.Write([]byte(logs)); err != nil {
-			fmt.Fprintf(errOut, "failed to send error to client: %v\n", err)
-		}
-		return
-	}
+    err = clipboard.WriteAll(string(data))
+    if err != nil {
+        fmt.Fprintf(errOut, "failed to save to clipboard: %v\n", err)
+        if _, err := conn.Write([]byte(err.Error())); err != nil {
+            fmt.Fprintf(errOut, "failed to send error to client: %v\n", err)
+        }
+        return
+    }
 }

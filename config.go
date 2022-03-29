@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -14,9 +15,8 @@ func LoadOpenerOptionsFromConfig(configPath string, o *OpenerOptions) error {
 			return err
 		}
 
-		configPath = filepath.Join(dir, ".config", "opener", "config.yaml")
+		configPath = filepath.Join(dir, ".config", "copier", "config.yaml")
 		if _, err := os.Stat(configPath); err != nil {
-			// The config file does not exist in the default path.
 			return nil
 		}
 	} else {
@@ -24,6 +24,7 @@ func LoadOpenerOptionsFromConfig(configPath string, o *OpenerOptions) error {
 			return err
 		}
 	}
+        fmt.Println(configPath)
 
 	b, err := os.ReadFile(configPath)
 	if err != nil {
@@ -33,6 +34,7 @@ func LoadOpenerOptionsFromConfig(configPath string, o *OpenerOptions) error {
 	if err := yaml.Unmarshal(b, o); err != nil {
 		return err
 	}
+    fmt.Println(o)
 
 	return nil
 }
