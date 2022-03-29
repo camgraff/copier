@@ -1,8 +1,10 @@
-# opener
+# copier
 
-![Logo](./sennuki.png)
+Seamless copy/paste over SSH.
 
-Open URL in your local web browser from the SSH-connected remote environment.
+Heavily inspired and originally forked from [opener](https://github.com/superbrothers/opener)
+
+## TODO: Update
 
 ## How does opener work?
 
